@@ -16,7 +16,7 @@ Item {
   property bool opened: false
   property string rawBinds: ""
   property var held: Model.emptyHeld()
-  property string titleText: "Shortcuts"
+  property string titleText: "Shortcut Helper"
   property var groups: []
   property int bindCount: 0
 
