@@ -21,23 +21,24 @@ Item {
     return dir ? (String(dir).replace(/\/$/, "") + "/hypr-hook.lua") : ""
   }
 
-  property string hookSource: ""
   property bool injected: false
 
+  // hyprctl treats argv that starts with "--" as a flag, so we cannot pass
+  // the Lua source (which begins with a comment) to `eval`. dofile() loads
+  // the file inside Hyprland instead.
   function injectHook() {
-    if (!hookSource || hookSource.indexOf("__cytracon_shortcuts") < 0) return
+    if (!hookPath) return
     evalProc.running = false
-    evalProc.command = ["hyprctl", "eval", hookSource]
+    evalProc.command = ["hyprctl", "eval", "dofile([[" + hookPath + "]])"]
     evalProc.running = true
-    injected = true
   }
 
   function disableHook() {
     evalProc.running = false
     evalProc.command = ["hyprctl", "eval",
-      "_G.__cytracon_shortcuts_enabled = false\n" +
-      "if _G.__cytracon_shortcuts_timer then _G.__cytracon_shortcuts_timer:set_enabled(false) end\n" +
-      "hl.exec_cmd('omarchy-shell -q shell hide " + pluginId + "')\n"]
+      "_G.__cytracon_shortcuts_enabled = false; " +
+      "if _G.__cytracon_shortcuts_timer then _G.__cytracon_shortcuts_timer:set_enabled(false) end; " +
+      "hl.exec_cmd('omarchy-shell -q shell hide " + pluginId + "')"]
     evalProc.running = true
     injected = false
   }
@@ -47,15 +48,17 @@ Item {
     path: root.hookPath
     watchChanges: true
     printErrors: false
-    onLoaded: {
-      root.hookSource = text()
-      root.injectHook()
-    }
+    onLoaded: root.injectHook()
     onFileChanged: reload()
   }
 
   Process {
     id: evalProc
+    onExited: function(code) {
+      var cmd = evalProc.command
+      if (cmd && cmd.length > 2 && String(cmd[2]).indexOf("dofile(") === 0)
+        root.injected = (code === 0)
+    }
   }
 
   Connections {
