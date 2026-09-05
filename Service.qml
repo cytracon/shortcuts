@@ -5,8 +5,11 @@ import Quickshell.Hyprland
 
 // Installs a compositor-side hold detector. Hyprland Lua watches Super / Ctrl
 // / Alt without consuming them; after one second the overlay is summoned.
-QtObject {
+Item {
   id: root
+  width: 0
+  height: 0
+  visible: false
 
   property string omarchyPath: ""
   property var shell: null
