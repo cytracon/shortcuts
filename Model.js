@@ -72,7 +72,7 @@ function heldTitle(held) {
   if (held.ctrl) parts.push("Ctrl")
   if (held.alt) parts.push("Alt")
   if (held.shift) parts.push("Shift")
-  return parts.length ? parts.join(" + ") : "Shortcuts"
+  return parts.length ? parts.join(" + ") : "Shortcut Helper"
 }
 
 function hasTrigger(held) {
