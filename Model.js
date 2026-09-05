@@ -23,11 +23,26 @@ var KEY_LABELS = {
   TAB: "Tab",
   SPACE: "Space",
   HOME: "Home",
+  LEFT: "Left",
+  RIGHT: "Right",
+  UP: "Up",
+  DOWN: "Down",
   "LEFT MOUSE BUTTON": "LMB",
   "RIGHT MOUSE BUTTON": "RMB",
   "MIDDLE MOUSE BUTTON": "MMB",
   mouse_down: "Wheel down",
-  mouse_up: "Wheel up"
+  mouse_up: "Wheel up",
+  "mouse:272": "LMB",
+  "mouse:273": "RMB",
+  "mouse:274": "MMB"
+}
+
+// XKB keycodes that Hyprland prints as code:N instead of a key name.
+var XKB_CODE_LABELS = {
+  20: "-",
+  21: "=",
+  22: "Backspace",
+  23: "Tab"
 }
 
 var GROUP_ORDER = [
@@ -113,6 +128,68 @@ function parseCombo(combo) {
   return { mods: mods, keys: keys }
 }
 
+function modsFromMask(mask) {
+  var n = Number(mask) || 0
+  return {
+    shift: (n & 1) !== 0,
+    ctrl: (n & 4) !== 0,
+    alt: (n & 8) !== 0,
+    super: (n & 64) !== 0
+  }
+}
+
+function parseHyprctlBinds(raw) {
+  var text = String(raw || "")
+  var lines = text.split("\n")
+  var rec = null
+  var out = []
+  var seen = {}
+
+  function flush() {
+    if (!rec) return
+    var action = String(rec.description || "").trim()
+    if (!action && rec.dispatcher && rec.dispatcher !== "__lua")
+      action = String(rec.dispatcher)
+    if (!action) return
+    var key = String(rec.key || "").trim()
+    if (key.indexOf(" + ") >= 0) key = key.slice(key.lastIndexOf(" + ") + 3)
+    if (!key && rec.keycode && rec.keycode !== "0") key = "code:" + rec.keycode
+    if (!key || key === "code:201") return
+    var mods = modsFromMask(rec.modmask)
+    var comboParts = []
+    if (mods.super) comboParts.push("SUPER")
+    if (mods.ctrl) comboParts.push("CTRL")
+    if (mods.alt) comboParts.push("ALT")
+    if (mods.shift) comboParts.push("SHIFT")
+    comboParts.push(key)
+    var combo = comboParts.join(" + ")
+    var id = combo + "\t" + action
+    if (seen[id]) return
+    seen[id] = true
+    out.push({ combo: combo, action: action, mods: mods, keys: [key] })
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (/^bind/.test(line)) {
+      flush()
+      rec = {}
+      continue
+    }
+    if (!rec) continue
+    var m = line.match(/^\s*([a-z]+):\s?(.*)$/)
+    if (m) rec[m[1]] = m[2]
+  }
+  flush()
+  return out
+}
+
+function parseBinds(raw) {
+  var text = String(raw || "")
+  if (/^bind/m.test(text) && /modmask:/.test(text)) return parseHyprctlBinds(text)
+  return parsePrint(text)
+}
+
 function parsePrint(raw) {
   var text = String(raw || "")
   var lines = text.split("\n")
@@ -120,11 +197,11 @@ function parsePrint(raw) {
   var seen = {}
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i]
-    var sep = line.indexOf("\u2192")
+    var sep = line.indexOf("→")
     if (sep < 0) sep = line.indexOf("->")
     if (sep < 0) continue
     var combo = line.slice(0, sep).replace(/\s+/g, " ").trim()
-    var action = line.slice(sep + (line[sep] === "\u2192" ? 1 : 2)).trim()
+    var action = line.slice(sep + (line[sep] === "→" ? 1 : 2)).trim()
     if (!combo || !action) continue
     var parsed = parseCombo(combo)
     var key = combo + "\t" + action
@@ -146,9 +223,6 @@ function matchesHeld(bind, held) {
   if (held.super && !bind.mods.super) return false
   if (held.ctrl && !bind.mods.ctrl) return false
   if (held.alt && !bind.mods.alt) return false
-  if (!held.super && bind.mods.super) return false
-  if (!held.ctrl && bind.mods.ctrl) return false
-  if (!held.alt && bind.mods.alt) return false
   if (held.shift && !bind.mods.shift) return false
   return true
 }
@@ -162,13 +236,30 @@ function filterByHeld(binds, held) {
   return out
 }
 
+function digitFromKey(key) {
+  var raw = String(key || "").trim()
+  if (/^[0-9]$/.test(raw)) return raw
+  var match = raw.match(/^code:(\d+)$/i)
+  if (!match) return null
+  var n = Number(match[1])
+  // XKB keycodes 10-19 are 1,2,3,4,5,6,7,8,9,0
+  if (n >= 10 && n <= 19) return "1234567890".charAt(n - 10)
+  return null
+}
+
 function prettyKey(key) {
   var raw = String(key || "")
   if (!raw) return ""
+  var digit = digitFromKey(raw)
+  if (digit) return digit
   if (KEY_LABELS[raw]) return KEY_LABELS[raw]
   var upper = raw.toUpperCase()
   if (KEY_LABELS[upper]) return KEY_LABELS[upper]
-  if (/^code:\d+$/i.test(raw)) return raw
+  var lower = raw.toLowerCase()
+  if (KEY_LABELS[lower]) return KEY_LABELS[lower]
+  var code = raw.match(/^code:(\d+)$/i)
+  if (code && XKB_CODE_LABELS[Number(code[1])]) return XKB_CODE_LABELS[Number(code[1])]
+  if (code) return raw
   if (raw.length === 1) return raw.toUpperCase()
   return raw.replace(/_/g, " ")
 }
@@ -217,7 +308,8 @@ function collapseBinds(binds) {
     if (used[i]) continue
     var info = workspaceNumber(list[i].action)
     var keys = list[i].keys || []
-    if (!info || keys.length !== 1 || !/^[0-9]$/.test(keys[0])) {
+    var digit = keys.length === 1 ? digitFromKey(keys[0]) : null
+    if (!info || !digit) {
       out.push(list[i])
       continue
     }
@@ -225,18 +317,19 @@ function collapseBinds(binds) {
     var sig = keySignature(list[i])
     var group = [i]
     var numbers = {}
-    numbers[info.number] = keys[0]
+    numbers[info.number] = digit
 
     for (var j = i + 1; j < list.length; j++) {
       if (used[j]) continue
       var other = workspaceNumber(list[j].action)
       var otherKeys = list[j].keys || []
+      var otherDigit = otherKeys.length === 1 ? digitFromKey(otherKeys[0]) : null
       if (!other || other.stem !== info.stem) continue
       if (keySignature(list[j]) !== sig) continue
-      if (otherKeys.length !== 1 || !/^[0-9]$/.test(otherKeys[0])) continue
+      if (!otherDigit) continue
       used[j] = true
       group.push(j)
-      numbers[other.number] = otherKeys[0]
+      numbers[other.number] = otherDigit
     }
 
     if (group.length < 3) {
@@ -252,7 +345,7 @@ function collapseBinds(binds) {
       combo: list[i].combo,
       action: info.stem + " workspace",
       mods: list[i].mods,
-      keys: [ordered[0] + "\u2026" + ordered[ordered.length - 1]]
+      keys: [ordered[0] + "…" + ordered[ordered.length - 1]]
     }
     out.push(collapsed)
   }
@@ -293,7 +386,7 @@ function groupBinds(binds) {
 
 function buildOverlay(raw, payload) {
   var held = parseHeld(payload)
-  var binds = collapseBinds(filterByHeld(parsePrint(raw), held))
+  var binds = collapseBinds(filterByHeld(parseBinds(raw), held))
   return {
     held: held,
     title: heldTitle(held),
@@ -310,8 +403,12 @@ if (typeof module !== "undefined") {
     hasTrigger: hasTrigger,
     parseCombo: parseCombo,
     parsePrint: parsePrint,
+    parseHyprctlBinds: parseHyprctlBinds,
+    parseBinds: parseBinds,
+    modsFromMask: modsFromMask,
     matchesHeld: matchesHeld,
     filterByHeld: filterByHeld,
+    digitFromKey: digitFromKey,
     prettyKey: prettyKey,
     prettyTokens: prettyTokens,
     prettyCombo: prettyCombo,

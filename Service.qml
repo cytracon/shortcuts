@@ -37,7 +37,8 @@ Item {
     evalProc.running = false
     evalProc.command = ["hyprctl", "eval",
       "_G.__cytracon_shortcuts_enabled = false; " +
-      "if _G.__cytracon_shortcuts_timer then _G.__cytracon_shortcuts_timer:set_enabled(false) end; " +
+      "if _G.__cytracon_shortcuts_timer then pcall(function() _G.__cytracon_shortcuts_timer:set_enabled(false) end) end; " +
+      "if _G.__cytracon_shortcuts_sub then pcall(function() _G.__cytracon_shortcuts_sub:remove() end) end; " +
       "hl.exec_cmd('omarchy-shell -q shell hide " + pluginId + "')"]
     evalProc.running = true
     injected = false

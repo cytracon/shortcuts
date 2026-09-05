@@ -1,7 +1,9 @@
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import QtQuick
+import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -19,27 +21,38 @@ Item {
   property string titleText: "Shortcut Helper"
   property var groups: []
   property int bindCount: 0
+  property var targetScreen: null
 
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
-  property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
-  property color dim: Qt.darker(foreground, 1.55)
+  property color cardColor: Util.alpha(Color.background, 0.97)
+  property color foreground: Color.popups.text
+  property color borderColor: Color.popups.border
+  property var borderSpec: Border.surfaceSpec("popups", "border", borderColor, Math.max(1, Style.space(2)))
+  property color scrim: Util.alpha(Color.background, 0.72)
+  property color muted: Util.alpha(foreground, 0.72)
   property string fontFamily: Style.font.menuFamily
-  property int contentMargin: Style.spacing.panelPadding
+  property int pad: Style.spacing.panelPadding
   readonly property int cornerRadius: Style.cornerRadius
-  property int cardWidth: Math.min(Style.space(980), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(640), panel.height - Style.gapsOut * 2)
-  property int columnWidth: Math.max(Style.space(220), Math.floor((cardWidth - contentMargin * 2 - Style.spacing.lg * 2) / 3))
-  property int rowHeight: Math.max(Style.space(22), Style.font.caption + Style.spacing.xs)
+  property int tokenPadX: Math.max(8, Style.spacing.sm)
+  property int tokenPadY: Math.max(4, Math.round(Style.spacing.xs))
+
+  function focusedScreen() {
+    var mon = Hyprland.focusedMonitor
+    var name = mon ? String(mon.name || "") : ""
+    var screens = Quickshell.screens
+    for (var i = 0; i < screens.length; i++) {
+      if (String(screens[i].name || "") === name) return screens[i]
+    }
+    return screens.length ? screens[0] : null
+  }
 
   function open(payloadJson) {
+    root.targetScreen = focusedScreen()
     root.held = Model.parseHeld(payloadJson)
     root.titleText = Model.heldTitle(root.held)
     root.opened = true
     root.rebuild()
-    if (!bindsProc.running) bindsProc.running = true
+    Qt.callLater(function() { flick.contentY = 0 })
+    if (root.rawBinds === "" && !bindsProc.running) bindsProc.running = true
   }
 
   function close() {
@@ -54,7 +67,7 @@ Item {
 
   function applyBinds(raw) {
     root.rawBinds = raw
-    root.rebuild()
+    if (root.opened) root.rebuild()
   }
 
   function rebuild() {
@@ -66,7 +79,7 @@ Item {
 
   Process {
     id: bindsProc
-    command: ["omarchy", "menu", "keybindings", "--print"]
+    command: ["hyprctl", "binds"]
     stdout: StdioCollector {
       onStreamFinished: root.applyBinds(this.text)
     }
@@ -75,174 +88,203 @@ Item {
   PanelWindow {
     id: panel
     visible: root.opened
+    screen: root.targetScreen
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     WlrLayershell.namespace: "omarchy-shortcuts"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
-    mask: Region {}
+
+    readonly property int cardW: Math.min(Math.round(width * 0.90), Math.max(Style.space(720), width - Style.gapsOut * 2))
+    readonly property int cardH: Math.min(Math.round(height * 0.86), Math.max(Style.space(480), height - Style.gapsOut * 2))
+    readonly property int colCount: 2
+    readonly property int colW: Math.max(Style.space(280), Math.floor((cardW - root.pad * 2 - Style.spacing.lg * Math.max(0, colCount - 1)) / colCount))
 
     Rectangle {
       anchors.fill: parent
       color: root.scrim
-      opacity: root.opened ? 0.55 : 0
-      Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.dismiss()
+      }
     }
 
     BorderSurface {
       id: card
-      width: root.cardWidth
-      height: Math.min(root.cardHeight, header.height + flow.implicitHeight + root.contentMargin * 2 + Style.spacing.md)
+      width: panel.cardW
+      height: panel.cardH
       radius: root.cornerRadius
       anchors.centerIn: parent
-      color: root.background
+      color: root.cardColor
       borderSpec: root.borderSpec
-      padding: root.contentMargin
-      opacity: root.opened ? 1 : 0
-      Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
 
-      Column {
+      MouseArea {
         anchors.fill: parent
-        anchors.topMargin: card.contentTopInset
-        anchors.rightMargin: card.contentRightInset
-        anchors.bottomMargin: card.contentBottomInset
-        anchors.leftMargin: card.contentLeftInset
-        spacing: Style.spacing.md
+        acceptedButtons: Qt.LeftButton
+        onClicked: {}
+      }
 
-        Item {
-          id: header
+      Item {
+        id: inner
+        anchors.fill: parent
+        anchors.margins: root.pad
+
+        Column {
+          id: headerCol
           width: parent.width
-          height: Math.max(Style.space(36), Style.font.title + Style.font.caption)
+          spacing: Style.spacing.sm
 
-          Row {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.spacing.sm
+          Item {
+            width: parent.width
+            height: Math.max(Style.space(36), Style.font.title + Style.spacing.sm)
 
-            Repeater {
-              model: {
-                var tokens = []
-                if (root.held.super) tokens.push("Super")
-                if (root.held.ctrl) tokens.push("Ctrl")
-                if (root.held.alt) tokens.push("Alt")
-                if (root.held.shift) tokens.push("Shift")
-                return tokens
-              }
-              delegate: Rectangle {
-                required property string modelData
-                height: Style.font.title + Style.spacing.sm
-                width: keyLabel.implicitWidth + Style.spacing.md
-                radius: Math.max(4, Style.cornerRadius / 2)
-                color: Util.alpha(Color.accent, 0.18)
-                border.color: Color.accent
-                border.width: 1
-                Text {
-                  id: keyLabel
-                  anchors.centerIn: parent
-                  text: modelData
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  font.bold: true
+            Flow {
+              id: heldRow
+              anchors.left: parent.left
+              anchors.right: countLabel.left
+              anchors.rightMargin: Style.spacing.md
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.sm
+
+              Repeater {
+                model: {
+                  var tokens = []
+                  if (root.held.super) tokens.push("Super")
+                  if (root.held.ctrl) tokens.push("Ctrl")
+                  if (root.held.alt) tokens.push("Alt")
+                  if (root.held.shift) tokens.push("Shift")
+                  if (!tokens.length) tokens.push("Shortcut Helper")
+                  return tokens
+                }
+                delegate: Rectangle {
+                  required property string modelData
+                  height: cap.implicitHeight + root.tokenPadY * 2
+                  width: cap.implicitWidth + root.tokenPadX * 2
+                  radius: Math.max(4, Style.cornerRadius / 2)
+                  color: Util.alpha(Color.accent, 0.22)
+                  border.color: Color.accent
+                  border.width: 1
+                  Text {
+                    id: cap
+                    anchors.centerIn: parent
+                    text: modelData
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    font.bold: true
+                  }
                 }
               }
             }
 
             Text {
+              id: countLabel
+              anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: root.bindCount === 1 ? "1 shortcut" : (root.bindCount + " shortcuts")
-              color: root.dim
+              color: root.muted
               font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.body
             }
           }
 
           Text {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            text: "Hold 1s \u00b7 release to close"
-            color: root.dim
+            width: parent.width
+            wrapMode: Text.Wrap
+            text: "Release or click to close. Mouse wheel scrolls."
+            color: root.muted
             font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: Style.font.body
           }
         }
 
-        Flow {
-          id: flow
-          width: parent.width
-          spacing: Style.spacing.lg
+        Flickable {
+          id: flick
+          anchors.top: headerCol.bottom
+          anchors.topMargin: Style.spacing.md
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          clip: true
+          contentWidth: width
+          contentHeight: flow.implicitHeight
+          boundsBehavior: Flickable.StopAtBounds
+          flickableDirection: Flickable.VerticalFlick
+          interactive: true
 
-          Repeater {
-            model: root.groups
-            delegate: Column {
-              required property var modelData
-              width: root.columnWidth
-              spacing: Style.spacing.xs
+          Flow {
+            id: flow
+            width: flick.width
+            spacing: Style.spacing.lg
 
-              Text {
-                text: modelData.title
-                color: Color.accent
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
+            Repeater {
+              model: root.groups
+              delegate: Column {
+                required property var modelData
+                property var group: modelData
+                width: panel.colW
+                spacing: Style.spacing.sm
 
-              Repeater {
-                model: modelData.items
-                delegate: Row {
-                  required property var modelData
-                  width: root.columnWidth
-                  spacing: Style.spacing.sm
-                  height: root.rowHeight
+                Text {
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  text: group.title
+                  color: Color.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                }
 
-                  Row {
-                    id: comboRow
-                    spacing: 4
-                    Repeater {
-                      model: modelData.tokens
-                      delegate: Rectangle {
-                        required property string modelData
-                        height: Style.font.caption + 6
-                        width: tokenLabel.implicitWidth + 10
-                        radius: 4
-                        color: Util.alpha(root.foreground, 0.08)
-                        border.color: Util.alpha(root.foreground, 0.18)
-                        border.width: 1
-                        Text {
-                          id: tokenLabel
-                          anchors.centerIn: parent
-                          text: modelData
-                          color: root.foreground
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption
+                Repeater {
+                  model: group.items
+                  delegate: RowLayout {
+                    required property var modelData
+                    property var bind: modelData
+                    width: panel.colW
+                    spacing: Style.spacing.sm
+
+                    Row {
+                      id: comboRow
+                      spacing: 4
+                      Layout.alignment: Qt.AlignVCenter
+
+                      Repeater {
+                        model: bind.tokens
+                        delegate: Rectangle {
+                          required property string modelData
+                          height: tok.implicitHeight + root.tokenPadY * 2
+                          width: tok.implicitWidth + root.tokenPadX * 2
+                          radius: 4
+                          color: Util.alpha(root.foreground, 0.12)
+                          border.color: Util.alpha(root.foreground, 0.28)
+                          border.width: 1
+                          Text {
+                            id: tok
+                            anchors.centerIn: parent
+                            text: modelData
+                            color: root.foreground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.body
+                          }
                         }
                       }
                     }
-                  }
 
-                  Text {
-                    width: Math.max(20, root.columnWidth - comboRow.width - Style.spacing.sm)
-                    elide: Text.ElideRight
-                    text: modelData.action
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                      Layout.fillWidth: true
+                      Layout.alignment: Qt.AlignVCenter
+                      wrapMode: Text.Wrap
+                      text: bind.action
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
                   }
                 }
               }
             }
           }
-        }
-
-        Text {
-          visible: root.groups.length === 0
-          width: parent.width
-          text: root.rawBinds === "" ? "Reading Hyprland keybindings\u2026" : "No Hyprland shortcuts use only these modifiers."
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
         }
       }
     }
