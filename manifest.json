@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.cytracon.shortcuts",
+  "name": "Shortcuts",
+  "version": "1.0.0",
+  "author": "Cytracon",
+  "license": "MIT",
+  "homepage": "https://github.com/cytracon/shortcuts",
+  "description": "Hold Super, Ctrl, or Alt for one second to see the Hyprland shortcuts that still work from those modifiers.",
+  "kinds": [
+    "overlay",
+    "service"
+  ],
+  "keepLoaded": true,
+  "activation": "on-demand",
+  "entryPoints": {
+    "overlay": "Overlay.qml",
+    "service": "Service.qml"
+  }
+}
