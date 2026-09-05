@@ -6,7 +6,7 @@ https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=submit-
 Title:
 
 ```
-[Plugin]: Shortcuts
+[Plugin]: Shortcut Helper
 ```
 
 Body (keep headings and checklist exactly):

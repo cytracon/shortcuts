@@ -1,4 +1,4 @@
-# Shortcuts — Omarchy plugin
+# Shortcut Helper — Omarchy plugin
 
 Hold **Super**, **Ctrl**, or **Alt** for one second and a cheatsheet pops up with the Hyprland shortcuts that still work from those modifiers. Release the key to dismiss it. Pressing any other key (a real shortcut) hides the overlay immediately so the binding still fires.
 
