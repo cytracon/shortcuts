@@ -12,8 +12,10 @@ _G.__cytracon_shortcuts_enabled = true
 
 local PLUGIN_ID = "io.github.cytracon.shortcuts"
 local HOLD_MS = 1000
+local HIDE_DEBOUNCE_MS = 120
+local SHOW_GRACE_MS = 400
 
--- evdev codes, XKB keycodes (evdev+8), and XKB keysyms for Super/Ctrl/Alt/Shift.
+-- evdev codes, XKB keycodes (evdev+8), and XKB keysyms.
 local MOD_CODES = {
   [29] = "ctrl", [37] = "ctrl", [97] = "ctrl", [105] = "ctrl",
   [56] = "alt", [64] = "alt", [100] = "alt", [108] = "alt",
@@ -28,6 +30,7 @@ local MOD_CODES = {
 
 local held = { super = 0, ctrl = 0, alt = 0, shift = 0 }
 local shown = false
+local ignore_hide = false
 
 local function key_down(name)
   local ok, res = pcall(function()
@@ -67,30 +70,68 @@ local function summon(s)
   hl.exec_cmd("omarchy-shell -q shell summon " .. PLUGIN_ID .. " '" .. payload(s) .. "'")
 end
 
-local function hide()
+local function hide_now()
   if not shown then return end
   shown = false
+  ignore_hide = false
   hl.exec_cmd("omarchy-shell -q shell hide " .. PLUGIN_ID)
 end
 
-local timer = hl.timer(function()
+local hold_timer = hl.timer(function()
   if not _G.__cytracon_shortcuts_enabled then return end
   local s = live()
   if not trigger_down(s) then return end
   shown = true
+  ignore_hide = true
   summon(s)
 end, { timeout = HOLD_MS, type = "oneshot" })
-timer:set_enabled(false)
-_G.__cytracon_shortcuts_timer = timer
+hold_timer:set_enabled(false)
+
+local hide_timer = hl.timer(function()
+  if ignore_hide then return end
+  if trigger_down() then return end
+  hide_now()
+end, { timeout = HIDE_DEBOUNCE_MS, type = "oneshot" })
+hide_timer:set_enabled(false)
+
+local grace_timer = hl.timer(function()
+  ignore_hide = false
+  if not trigger_down() then
+    hide_timer:set_enabled(false)
+    hide_timer:set_timeout(HIDE_DEBOUNCE_MS)
+    hide_timer:set_enabled(true)
+  end
+end, { timeout = SHOW_GRACE_MS, type = "oneshot" })
+grace_timer:set_enabled(false)
+
+local _summon = summon
+summon = function(s)
+  ignore_hide = true
+  grace_timer:set_enabled(false)
+  grace_timer:set_timeout(SHOW_GRACE_MS)
+  grace_timer:set_enabled(true)
+  hide_timer:set_enabled(false)
+  _summon(s)
+end
+
+_G.__cytracon_shortcuts_timer = hold_timer
 
 local function arm()
-  timer:set_enabled(false)
-  timer:set_timeout(HOLD_MS)
-  timer:set_enabled(true)
+  hide_timer:set_enabled(false)
+  hold_timer:set_enabled(false)
+  hold_timer:set_timeout(HOLD_MS)
+  hold_timer:set_enabled(true)
 end
 
 local function disarm()
-  timer:set_enabled(false)
+  hold_timer:set_enabled(false)
+end
+
+local function request_hide()
+  if ignore_hide or not shown then return end
+  hide_timer:set_enabled(false)
+  hide_timer:set_timeout(HIDE_DEBOUNCE_MS)
+  hide_timer:set_enabled(true)
 end
 
 local function is_press(state)
@@ -121,21 +162,18 @@ hl.on("input.keyboard.key", function(keycode, _time, state)
   local s = live()
   if not trigger_down(s) then
     disarm()
-    hide()
+    request_hide()
     return
   end
 
-  if which then
-    if shown then
-      summon(s)
-      return
-    end
+  hide_timer:set_enabled(false)
+
+  if shown then
+    if which then summon(s) end
+    return
+  end
+
+  if which and is_press(state) then
     arm()
-    return
-  end
-
-  if is_press(state) then
-    disarm()
-    hide()
   end
 end)
