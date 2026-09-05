@@ -22,7 +22,7 @@ System
 
 ### Tags
 
-overlay, keybindings, hyprland
+Hyprland, Quickshell, System
 
 ### Suggest a missing tag
 
